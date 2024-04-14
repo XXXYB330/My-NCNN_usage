@@ -1,0 +1,81 @@
+    HuPengsheet/use-ncnn: NCNN的代码学习，各种小Demo。 (github.com)
+        bilibili有视频：https://www.bilibili.com/video/BV1MV411F7iV/?spm_id_from=333.999.0.0
+        编译时遇到的问题
+            1.protobuf（未解决）
+                FAQ ncnn protobuf problem.zh · Tencent/ncnn Wiki (github.com)
+                NCNN 编译caffe2ncnn 找不到google/protobuf/port_def.inc - 知乎 (zhihu.com)
+
+            2.cmake -DNCNN_BUILD_TOOLS=OFF ..  可以跳过工具编译，caffe2ncnn这些工具可以在 release 里下载编译好的二进制程序
+                Release android ios macos linux windows webassembly 预编译库 20240102 1e88fb8 · Tencent/ncnn (github.com)
+
+
+
+    NCNN源码学习记录
+        源码结构：
+            benchmark：一些常见模型的模型文件（*.param），如mobilenet，resnet，vgg等和硬件加速排名的RankCard
+            cmake：有关链接openmp和valkan的cmake文件，这两个都是并行计算加速用的
+            docs：文档，包括开发指南（如何自定义layer），构建指南（how to build）、使用指南（如何opt，如何int8量化）和FAQ（报错解决办法）等等
+            examples：使用ncnn的示例，包括几个常用模型（squeezenet_v1.1和yolo）的cpp调用示例，及其cmakelist文件
+            images：此目录无关紧要，是页面上的图片
+            src：ncnn源码目录
+            toolchains：不同平台的cmake编译文件，包括aarch64、arm-linux、ios、jetson、pi3、riscc64、ios、c906、c910等
+            tools：包含其他深度学习框架模型（caffe、darknet、onnx、pnnx、plugin等）转换到ncnn模型的工具（onnx2ncnn……），以及优化（ncnnoptimize）量化（ncnn2table、ncnn2int8）工具等
+            build.sh:构建脚本
+            CMakeLists.txt：总的cmake文件
+
+        /ncnn/src
+            layer
+                NCNN推理代码流程：
+                ｜ ncnn源码学习（一）：学习顺序 - 知乎 (zhihu.com)
+                    网络加载
+                        load_param
+                        load_model
+
+                    数据预处理
+                        from_pixels_resize
+                        substract_mean_normalize
+
+                    网络推理
+                        create_extractor
+                        input
+                        extract
+
+                    每一层的推理（隐含在模型内的）
+
+                relu.cpp  relu.h  最简单的relu算子，relu也是一个无参算子
+                ｜ ncnn源码学习（五）：relu算子 - 知乎 (zhihu.com)
+                    one_blob_only：设置为true，表明该ReLU激活层仅处理单个输入张量（blob），不支持多个输入合并计算。
+                    support_inplace：设置为true，表示该ReLU激活层支持原地计算（in-place computation）。这意味着在满足一定条件的情况下，ReLU激活层可以直接在其输入张量上进行计算，而非创建新的输出张量。原地计算可以节省内存资源，提高计算效率。
+
+                pooling.h  pooling.cpp  pooling和relu一样，也是一个无权重的算子，只有几个配置参数而已
+                ｜ ncnn源码学习（六）：pooling算子 - 知乎 (zhihu.com)
+                    这段代码实现了最大池化操作的前向传播计算，对输入张量bottom_blob中的每个通道计算其所有元素的最大值，并将结果存储在输出张量top_blob中。如果在计算过程中出现错误（如输出张量创建失败），函数将返回相应的错误码。需要注意的是，这里的最大池化实现并未指定池化窗口大小和步长，而是简单地将整个输入张量作为一个池化窗口，计算单个最大值。在实际应用中，最大池化通常会指定固定的窗口大小（如2x2、3x3等）和步长，并在输入特征图上滑动窗口进行计算。
+
+                convolution.h convolution.cpp  卷积算子与前面看的relu和pooling不同，他是有权重的layer
+                ｜ ncnn源码学习（七）：convolution算子 - 知乎 (zhihu.com)
+                    在深度学习中，特别是卷积神经网络（CNN）中，通常还会结合填充（padding）、多通道（多核卷积）、非线性激活函数（如ReLU）等操作，以提取更丰富的图像特征。但核心的卷积计算依然遵循上述乘积累加的过程。
+
+                split.h  split.cpp  split能让网络实现分支的功能，同时split是典型的“单输入多输出”layer
+                ｜ split和concat都是无参数无权重的，也就是说不需要从param读取layer特定参数，不需要从bin读取权重参数。
+                concat.h  concat.cpp  concat能让网络实现分支的功能，concat是“多输入单输出”layer
+                ｜ split和concat都是无参数无权重的，也就是说不需要从param读取layer特定参数，不需要从bin读取权重参数。
+
+            allocator.cpp  allocator.h  《分配器文件》Allocator基类在allocator.h中。Allocator有两个子类PoolAllocator和UnlockedPoolAllocator，一个是带锁的内存分配，一个是无锁的内存分配。当然两个类里都继承了fastMalloc和fastFree函数。alignSize主要作用就是内存对齐。
+            blob.cpp  blob.h  这段代码定义了一个名为 Blob 的类，该类是深度学习框架 NCNN中的一个核心组件，blob中定义了producer和consumer，使用了命名空间namespace。
+            c_api.cpp  c_api.h  定义API特定接口
+            ｜  可以说，API 是一种特定类型的接口，它更具体、更系统化，通常伴随着清晰的文档、版本管理以及特定的使用场景。API 是接口概念在特定上下文（如应用程序开发）中的具体化表现。所有API都是接口，但并非所有的接口都是API。例如，一个类的接口只是定义了该类如何被其他代码使用，而一个API则可能包含多个类、函数、数据结构的接口，共同构成了一个完整的功能集，用于实现特定的软件集成或服务调用。
+            net.cpp  net.h   Net类的定义。用来记录网络。其中包含了vulkan的代码，vulkan主要时用来做计算加速的，剔除vulkan相关代码和头文件后，来看net.h的源码，有两个class，Net和Extractor。完成模型网络结构和模型权重参数的载入，就可以运行网络了，这就需要Extractor了，create_extractor()的实现调用了Extractor()
+                【高性能计算】NCNN源码解析笔记_ncnn量化源码-CSDN博客
+
+            layer.cpp  layer.h  layer类的定义。Layer类通过layer layer_type layer_shader_type 三个文件做了大体的说明，layer 就是NCNN实现的网络层的父类，其子类要实现父类的方法。
+                【NCNN源码解读】Layer类（一） - 知乎 (zhihu.com)
+                【NCNN源码解读】Layer类（二） - 知乎 (zhihu.com)
+
+            mat.cpp  mat.h Mat类的定义。
+                【NCNN源码解读】Mat类（一） - 知乎 (zhihu.com)
+                【NCNN源码解读】Mat（二）Normalize - 知乎 (zhihu.com)
+                【NCNN源码解读】Mat（三）Mat Pixel - 知乎 (zhihu.com)
+
+
+
+
